@@ -8,14 +8,32 @@
 #   3) ai_agent.py         (needs OPENAI_API_KEY from .env)
 #
 # Usage:
-#   ./run_pipeline.sh              # run all stages in order
-#   ./run_pipeline.sh ensemble    # run a single stage (ensemble|annotator|agent)
+#   asta-run                 # run all stages in order, using the .gef in $PWD
+#   asta-run ensemble        # run a single stage (ensemble|annotator|agent)
 #
-# Aborts immediately if the GEF input file is missing or any stage fails.
+# Runs against the current directory as the data folder (or $ST_DATA_DIR, if
+# set) — not wherever this script itself is installed. Aborts immediately if
+# the GEF input file is missing or any stage fails.
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  cat <<'EOF'
+Usage: asta-run [ensemble|annotator|agent|all]
+
+Run the Spatial Transcriptomics analysis stages in order, using the .gef
+file in the current directory (or $ST_INPUT_GEF, if set). Set $ST_DATA_DIR
+to point at a different data folder without cd'ing there first.
+
+  ensemble    run ensemble_clustering only
+  annotator   run annotator only (needs ensemble's output)
+  agent       run ai_agent only (needs OPENAI_API_KEY in .env; optional)
+  all         run all three stages in order (default)
+EOF
+  exit 0
+fi
 
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${ST_DATA_DIR:-$PWD}" && pwd)"
 cd "$PROJECT_DIR"
 
 LOG_DIR="$PROJECT_DIR/logs"
@@ -23,48 +41,16 @@ RUN_TS="$(date +%Y%m%d_%H%M%S)"
 
 # --- Resolve which Python to use ---------------------------------------------
 # Preference order:
-#   1) an already-active environment (conda or venv) — respect whatever the
-#      caller has activated
-#   2) the recommended conda env from environment.yml ("spatial-transcriptomics"),
-#      found via `conda` on PATH
-#   3) the same conda env, found by checking well-known install locations
-#      directly — needed because launchd/cron run with a minimal PATH that
-#      usually doesn't include Homebrew/Miniconda's bin directory, so step 2's
-#      `command -v conda` silently fails even when conda is installed
-#   4) a legacy .venv (the old pip/venv setup)
-#   5) whatever python3 is on PATH
+#   1) $ST_PYTHON — set by the asta-run console-script shim (src/asta/cli.py)
+#      to the exact interpreter this package is installed under. This is what
+#      makes launchd/cron runs correct even though they start with a minimal
+#      PATH and no conda/venv activated.
+#   2) whatever python3 is on PATH — covers running
+#      `bash src/asta/run_pipeline.sh` directly from an activated conda/venv
+#      env, without going through asta-run
 resolve_python() {
-  if [[ -n "${CONDA_PREFIX:-}" || -n "${VIRTUAL_ENV:-}" ]] && command -v python3 >/dev/null 2>&1; then
-    command -v python3
-    return 0
-  fi
-  if command -v conda >/dev/null 2>&1; then
-    local conda_py
-    conda_py="$(conda run -n spatial-transcriptomics python -c 'import sys; print(sys.executable)' 2>/dev/null || true)"
-    if [[ -n "$conda_py" && -x "$conda_py" ]]; then
-      echo "$conda_py"
-      return 0
-    fi
-  fi
-  local base candidate
-  for base in \
-    "$HOME/miniconda3" \
-    "$HOME/anaconda3" \
-    "$HOME/miniforge3" \
-    "/opt/homebrew/Caskroom/miniconda/base" \
-    "/opt/homebrew/Caskroom/miniforge/base" \
-    "/usr/local/Caskroom/miniconda/base" \
-    "/opt/miniconda3" \
-    "/opt/anaconda3"
-  do
-    candidate="$base/envs/spatial-transcriptomics/bin/python"
-    if [[ -x "$candidate" ]]; then
-      echo "$candidate"
-      return 0
-    fi
-  done
-  if [[ -x "$PROJECT_DIR/.venv/bin/python" ]]; then
-    echo "$PROJECT_DIR/.venv/bin/python"
+  if [[ -n "${ST_PYTHON:-}" && -x "${ST_PYTHON}" ]]; then
+    echo "$ST_PYTHON"
     return 0
   fi
   command -v python3 2>/dev/null
@@ -99,10 +85,8 @@ fi
 # --- Preflight checks --------------------------------------------------------
 if [[ -z "$PY" || ! -x "$PY" ]]; then
   echo "ERROR: could not find a Python interpreter to run the pipeline with." >&2
-  echo "       Set up the environment first (recommended):" >&2
-  echo "         conda env create -f environment.yml" >&2
-  echo "       or, for the legacy pip/venv setup:" >&2
-  echo "         python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt" >&2
+  echo "       Activate the conda/venv environment this package is installed in" >&2
+  echo "       (e.g. 'conda activate <env-name>') and re-run." >&2
   exit 1
 fi
 echo "Using Python: $PY"
@@ -134,14 +118,14 @@ format_duration() {
 }
 
 run_stage() {
-  local name="$1" script="$2"
+  local name="$1" module="$2"
   local log="$LOG_DIR/${RUN_TS}_${name}.log"
-  echo ">>> [$name] starting: $script"
+  echo ">>> [$name] starting: $module"
   echo "    input : $ST_INPUT_GEF"
   echo "    log   : $log"
   local start; start=$(date +%s)
 
-  "$PY" "$script" >"$log" 2>&1 &
+  "$PY" -m "$module" >"$log" 2>&1 &
   local pid=$!
 
   # Heartbeat so long silent stretches (clustering/embedding steps can run
@@ -173,7 +157,7 @@ run_stage() {
 
 # --- Notify on completion (success or failure) --------------------------------
 # Mirrors what watch_runner.py/watch_runner.sh do for automatic runs, so a
-# manual ./run_pipeline.sh also emails/desktop-notifies you when it's done.
+# manual asta-run also emails/desktop-notifies you when it's done.
 # Best-effort: notify.py itself no-ops email if GMAIL_* isn't set in .env.
 PIPELINE_START=$(date +%s)
 notify_on_exit() {
@@ -184,8 +168,8 @@ notify_on_exit() {
   [[ $exit_code -ne 0 ]] && status="FAILED"
   local summary="Spatial Transcriptomics pipeline $status in $(format_duration "$total_dur") — file: $(basename "$GEF"). Logs: $LOG_DIR"
   echo "$summary"
-  if [[ -n "${PY:-}" && -f "$PROJECT_DIR/notify.py" ]]; then
-    "$PY" "$PROJECT_DIR/notify.py" "ST pipeline: $status" "$summary" || true
+  if [[ -n "${PY:-}" ]]; then
+    "$PY" -m asta.notify "ST pipeline: $status" "$summary" || true
   fi
   exit "$exit_code"
 }
@@ -195,13 +179,13 @@ STAGE="${1:-all}"
 echo "=== Spatial Transcriptomics pipeline | run $RUN_TS | stage=$STAGE ==="
 
 case "$STAGE" in
-  ensemble)  run_stage ensemble  ensemble_clustering.py ;;
-  annotator) run_stage annotator annotator.py ;;
-  agent)     run_stage agent     ai_agent.py ;;
+  ensemble)  run_stage ensemble  asta.ensemble_clustering ;;
+  annotator) run_stage annotator asta.annotator ;;
+  agent)     run_stage agent     asta.ai_agent ;;
   all)
-    run_stage ensemble  ensemble_clustering.py
-    run_stage annotator annotator.py
-    run_stage agent     ai_agent.py
+    run_stage ensemble  asta.ensemble_clustering
+    run_stage annotator asta.annotator
+    run_stage agent     asta.ai_agent
     ;;
   *)
     echo "ERROR: unknown stage '$STAGE' (use: ensemble | annotator | agent | all)" >&2

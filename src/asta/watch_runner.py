@@ -10,9 +10,9 @@ folder, it automatically runs the pipeline (ensemble clustering -> biological
 annotation -> AI agent) and sends a notification when done.
 
 Usage:
-    python watch_runner.py                  # watch the current directory
-    python watch_runner.py --path /some/dir # watch a specific project folder
-    python watch_runner.py --once           # process any existing unprocessed
+    python -m asta.watch_runner                  # watch the current directory
+    python -m asta.watch_runner --path /some/dir # watch a specific data folder
+    python -m asta.watch_runner --once           # process any existing unprocessed
                                               # .gef file(s) once, then exit
                                               # (useful for testing)
 
@@ -39,9 +39,9 @@ from watchdog.observers import Observer
 # standalone comparison/benchmark script, not part of the required chain;
 # see README.md Step 3.1.)
 STAGES = [
-    ("ensemble", "ensemble_clustering.py"),
-    ("annotator", "annotator.py"),
-    ("agent", "ai_agent.py"),
+    ("ensemble", "asta.ensemble_clustering"),
+    ("annotator", "asta.annotator"),
+    ("agent", "asta.ai_agent"),
 ]
 
 STATE_DIR = Path.home() / ".sttx-watch"
@@ -132,10 +132,10 @@ def resolve_python() -> str:
     return sys.executable
 
 
-def run_stage(project_dir: Path, log_dir: Path, run_ts: str, name: str, script: str,
+def run_stage(project_dir: Path, log_dir: Path, run_ts: str, name: str, module: str,
               input_gef: Path, py: str) -> bool:
     log_path = log_dir / f"{run_ts}_{name}.log"
-    log(f">>> [{name}] starting: {script}")
+    log(f">>> [{name}] starting: {module}")
     log(f"    input : {input_gef}")
     log(f"    log   : {log_path}")
     start = time.time()
@@ -144,7 +144,7 @@ def run_stage(project_dir: Path, log_dir: Path, run_ts: str, name: str, script: 
     env["ST_RUN_ID"] = run_ts
     with open(log_path, "w") as logfile:
         proc = subprocess.Popen(
-            [py, str(project_dir / script), "--input", str(input_gef)],
+            [py, "-m", module, "--input", str(input_gef)],
             cwd=str(project_dir),
             env=env,
             stdout=logfile,
@@ -181,8 +181,8 @@ def run_pipeline(project_dir: Path, input_gef: Path) -> bool:
     run_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     log(f"=== Spatial Transcriptomics pipeline | run {run_ts} | stage=all ===")
     log(f"Using Python: {py}")
-    for name, script in STAGES:
-        if not run_stage(project_dir, log_dir, run_ts, name, script, input_gef, py):
+    for name, module in STAGES:
+        if not run_stage(project_dir, log_dir, run_ts, name, module, input_gef, py):
             return False
     log("=== pipeline complete ===")
     return True
@@ -194,16 +194,14 @@ def notify(project_dir: Path, status: str, gef_name: str, duration: float) -> No
         f"file: {gef_name}. Outputs in project folder; details: {WATCH_LOG}"
     )
     log(summary)
-    notify_script = project_dir / "notify.py"
-    if notify_script.exists():
-        try:
-            subprocess.run(
-                [sys.executable, str(notify_script), f"ST pipeline: {status}", summary],
-                cwd=str(project_dir),
-                timeout=60,
-            )
-        except Exception as e:  # noqa: BLE001
-            log(f"[notify] failed to invoke notify.py: {e}")
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "asta.notify", f"ST pipeline: {status}", summary],
+            cwd=str(project_dir),
+            timeout=60,
+        )
+    except Exception as e:  # noqa: BLE001
+        log(f"[notify] failed to invoke asta.notify: {e}")
 
 
 def process_gef(path: Path, project_dir: Path) -> None:
@@ -272,7 +270,7 @@ def main():
     )
     parser.add_argument(
         "--path", default=None,
-        help="Project folder to watch (default: the folder this script lives in)",
+        help="Data folder to watch (default: the current directory)",
     )
     parser.add_argument(
         "--once", action="store_true",
@@ -281,7 +279,7 @@ def main():
     )
     args = parser.parse_args()
 
-    project_dir = Path(args.path).resolve() if args.path else Path(__file__).resolve().parent
+    project_dir = Path(args.path).resolve() if args.path else Path.cwd().resolve()
 
     env_file = project_dir / ".env"
     if env_file.exists():

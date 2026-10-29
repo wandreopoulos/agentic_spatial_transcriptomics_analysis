@@ -19,7 +19,7 @@ import os
 import time
 import json
 
-from ovarian_knowledge_base import OvarianKnowledgeBase
+from .ovarian_knowledge_base import OvarianKnowledgeBase
 
 warnings.filterwarnings('ignore')
 

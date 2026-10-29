@@ -1,25 +1,25 @@
 # Deploying the Spatial Transcriptomics Pipeline for Automatic, Ongoing Analysis
 
-This guide explains how to set up automated, ongoing analysis with new datasets for Maiqi Zhang's spatial transcriptomics analysis pipeline: drop a new `.gef` file into the project folder, and the full pipeline runs on its own.
+This guide explains how to set up automated, ongoing analysis with new datasets for Maiqi Zhang's spatial transcriptomics analysis pipeline: drop a new `.gef` file into your **data folder** — any folder you choose, separate from wherever the code itself is installed — and the full pipeline runs on its own.
 
-There are two ways to get this behavior, and this repo actually contains **two separate watcher scripts** — here's why, and which one you want.
+There are two ways to get this behavior, backed by **two separate watcher implementations** under the hood — here's why, and which one you want. Both are started through installed console commands (`asta-watch`, `asta-watch-launchd`), not by running a script file directly.
 
 ### Which watcher should I use?
 
-If you're not sure, use `watch_runner.py`. It's the simpler, self-contained option and works everywhere.
+If you're not sure, use `asta-watch`. It's the simpler, self-contained option and works everywhere.
 
-| | `watch_runner.py` | `watch_runner.sh` |
+| | `asta-watch` | `asta-watch-launchd` |
 |---|---|---|
 | **Platforms** | macOS, Linux, Windows | macOS only |
-| **Extra install** | None (just the `watchdog` package, already in `environment.yml`) | OpenClaw (Node.js + `npm install -g openclaw`) |
-| **How it's triggered** | Runs itself continuously in the foreground/background — `python watch_runner.py`, watches for file changes directly | Triggered by macOS `launchd` (installed by `openclaw onboard --install-daemon`); calls `run_pipeline.sh` to actually run the stages |
+| **Extra install** | None (just the `watchdog` package, already a dependency) | OpenClaw (Node.js + `npm install -g openclaw`) |
+| **How it's triggered** | Runs itself continuously in the foreground/background — `asta-watch`, watches for file changes directly | Triggered by macOS `launchd` (installed by `openclaw onboard --install-daemon`); runs the bundled `run_pipeline.sh` to actually run the stages |
 | **On-demand triggering** | Not built in — you'd trigger a run by dropping a file, same as always | Browser chat dashboard (`openclaw dashboard`) and iMessage (text your Mac: "Run the full pipeline") |
-| **Notifications** | Desktop notification (macOS only) + email (any OS, via `notify.py`) | Desktop notification + email, same `notify.py` |
+| **Notifications** | Desktop notification (macOS only) + email (any OS, via `asta-notify`) | Desktop notification + email, same `asta-notify` |
 
-Both scripts do the same underlying job (detect a new `.gef` file, run the three pipeline stages, avoid duplicate/overlapping runs, notify when done) — `watch_runner.sh` exists because it's what OpenClaw's automatic daemon is built on, giving you the dashboard/iMessage extras in exchange for macOS + Node.js + OpenClaw's setup. `watch_runner.py` exists so the core "drop and walk away" behavior doesn't require any of that. You don't need both — pick one based on whether you want the OpenClaw extras.
+Both do the same underlying job (detect a new `.gef` file, run the three pipeline stages, avoid duplicate/overlapping runs, notify when done) — `asta-watch-launchd` exists because it's what OpenClaw's automatic daemon is built on, giving you the dashboard/iMessage extras in exchange for macOS + Node.js + OpenClaw's setup. `asta-watch` exists so the core "drop and walk away" behavior doesn't require any of that. You don't need both — pick one based on whether you want the OpenClaw extras.
 
-- **Option A: `watch_runner.py`** (recommended) — a cross-platform Python watcher included in this repo. Works on macOS, Linux, and Windows with no extra tools beyond what's already in `environment.yml`.
-- **Option B: OpenClaw** (macOS only) — an external AI agent CLI that additionally provides a browser dashboard and iMessage triggering on top of the same automatic behavior. Requires Node.js and its own onboarding; only available on macOS (it installs `watch_runner.sh` as a `launchd` daemon under the hood).
+- **Option A: `asta-watch`** (recommended) — a cross-platform Python watcher included in this package. Works on macOS, Linux, and Windows with no extra tools beyond what's already installed with the package.
+- **Option B: OpenClaw** (macOS only) — an external AI agent CLI that additionally provides a browser dashboard and iMessage triggering on top of the same automatic behavior. Requires Node.js and its own onboarding; only available on macOS (it installs `asta-watch-launchd` as a `launchd` daemon under the hood).
 
 Both run the same three pipeline stages in sequence:
 
@@ -27,11 +27,11 @@ Both run the same three pipeline stages in sequence:
 2. **Biological Annotation** — identifies cell types across 8 ovarian cell types (~20 min)
 3. **AI Agent Discovery** — autonomously generates and tests biological hypotheses (~10-20 min)
 
-## Option A: `watch_runner.py` (Recommended, Cross-Platform)
+## Option A: `asta-watch` (Recommended, Cross-Platform)
 
 ### Prerequisites
 
-- Python 3.9+ with the project's dependencies installed — see the main [README](README.md) for the recommended conda setup via `environment.yml` (this includes the `watchdog` package `watch_runner.py` needs)
+- Python 3.11+ with the package installed — see the main [README](README.md) (`pip install -e .` for development, or `conda install`/`pip install` once published), which makes the `asta-watch` command available on your `PATH` and pulls in `watchdog`, the only extra dependency it needs
 - Optional: an OpenAI API key (for the AI agent's LLM-based hypothesis generation — falls back to rule-based hypotheses without one)
 - Optional: a Gmail account (for email notifications — desktop notifications and log files work regardless)
 
@@ -39,26 +39,27 @@ Both run the same three pipeline stages in sequence:
 
 ```bash
 conda activate spatial-transcriptomics   # or your venv
-python watch_runner.py
+cd /path/to/your/data-folder             # or pass --path instead of cd'ing
+asta-watch
 ```
 
-Leave it running. Drop any `.gef` file into the project folder, and the pipeline starts automatically within seconds. You'll see progress logged to the terminal and to `logs/`, and get a notification (desktop + email, if `.env` is configured — see below) when it finishes.
+Leave it running. Drop any `.gef` file into that data folder, and the pipeline starts automatically within seconds. You'll see progress logged to the terminal and to `logs/` (created inside the data folder), and get a notification (desktop + email, if `.env` is configured — see below) when it finishes.
 
 The watcher is anti-loop safe — it will not re-run if the same file (by path + size) is dropped twice, or if a run is already in progress. Press Ctrl+C to stop it.
 
-**Test it without waiting for a real run:** `python watch_runner.py --once` processes any unprocessed `.gef` file already sitting in the folder once, then exits — useful for verifying the setup works.
+**Test it without waiting for a real run:** `asta-watch --once` processes any unprocessed `.gef` file already sitting in the folder once, then exits — useful for verifying the setup works.
 
 ### Keeping It Running in the Background
 
-`python watch_runner.py` needs to stay running to catch new files. Templates for running it as a background service are in `deploy/`:
+`asta-watch` needs to stay running to catch new files. Templates for running it as a background service are in `deploy/`:
 
-- **macOS:** `deploy/com.sttx-watch.plist.template` — a `launchd` agent (same mechanism OpenClaw's daemon uses, but pointed at `watch_runner.py` directly, no OpenClaw/Node.js required). Copy it to `~/Library/LaunchAgents/`, fill in the placeholder paths, then `launchctl load`.
+- **macOS:** `deploy/com.sttx-watch.plist.template` — a `launchd` agent (same mechanism OpenClaw's daemon uses, but pointed at the installed `asta-watch` command directly, no OpenClaw/Node.js required). Copy it to `~/Library/LaunchAgents/`, fill in the placeholder paths (including the full path to `asta-watch` inside your conda env's `bin/`), then `launchctl load`.
 - **Linux:** `deploy/sttx-watch.service.template` — a `systemd` user service. Copy it to `~/.config/systemd/user/`, fill in the placeholder paths, then `systemctl --user enable --now`.
-- **Windows:** no template provided (systemd/launchd don't exist there) — either leave a terminal open running `python watch_runner.py`, or set up a Task Scheduler task that runs `python watch_runner.py` at logon with "Repeat task" disabled and "If the task is already running" set to "Do not start a new instance" (the script's own file-locking still applies as a second safety net).
+- **Windows:** no template provided (systemd/launchd don't exist there) — either leave a terminal open running `asta-watch`, or set up a Task Scheduler task that runs `asta-watch` at logon with "Repeat task" disabled and "If the task is already running" set to "Do not start a new instance" (the script's own file-locking still applies as a second safety net).
 
 ### Environment Variables
 
-Optional — create a `.env` file in the project folder for email notifications:
+Optional — create a `.env` file in the data folder for email notifications:
 
 ```bash
 GMAIL_USER=your@gmail.com
@@ -71,12 +72,12 @@ To get a Gmail App Password: Google Account → Security → 2-Step Verification
 
 ## Option B: OpenClaw (macOS Only, Adds Dashboard + iMessage)
 
-If you're on macOS and want the extra on-demand triggering channels (browser dashboard, iMessage) on top of the same automatic behavior, OpenClaw is an alternative to `watch_runner.py`.
+If you're on macOS and want the extra on-demand triggering channels (browser dashboard, iMessage) on top of the same automatic behavior, OpenClaw is an alternative to `asta-watch`.
 
 ### Prerequisites
 
 - macOS (the auto-run watcher uses macOS launchd)
-- Python 3.9+ (see the main [README](README.md) for the recommended conda setup via `environment.yml`)
+- Python 3.11+ (see the main [README](README.md) for the recommended conda setup via `environment.yml`)
 - Node.js 22+
 - An Anthropic or OpenAI API key
 - A Gmail account (for email notifications)
@@ -99,7 +100,7 @@ Then configure the same `.env` file described in Option A above.
 
 ### Running the Pipeline
 
-**Automatic (Drop and Walk Away):** same as Option A — drop a `.gef` file into the project folder, and OpenClaw's `launchd` watcher (calling `run_pipeline.sh`) picks it up within ~6 seconds.
+**Automatic (Drop and Walk Away):** same as Option A — drop a `.gef` file into your data folder, and OpenClaw's `launchd` watcher (running `asta-watch-launchd`, which in turn calls the bundled `run_pipeline.sh`) picks it up within ~6 seconds. Configure OpenClaw's watcher to run `<env>/bin/asta-watch-launchd <DATA_DIR>` rather than a path inside a git clone.
 
 **On Demand from the Dashboard:**
 
@@ -128,8 +129,8 @@ Select iMessage, then text your Mac from your phone: `Run the full pipeline`
 ## Using a New Dataset
 
 1. Obtain a `.gef` file output from the Stereo-seq Analysis Workflow (SAW)
-2. Drop it into the project folder
-3. The pipeline runs automatically and outputs results to `output/<run timestamp>/<stage>/`, with all three stages from one run sharing the same timestamp folder:
+2. Drop it into your data folder (the one `asta-watch`/`asta-watch-launchd` is watching)
+3. The pipeline runs automatically and outputs results to `output/<run timestamp>/<stage>/` inside that data folder, with all three stages from one run sharing the same timestamp folder:
    - `output/<run timestamp>/ensemble/` — clustering results and plots
    - `output/<run timestamp>/annotator/` — cell type assignments
    - `output/<run timestamp>/agent/` — AI-generated hypotheses and discoveries

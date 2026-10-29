@@ -10,14 +10,40 @@
 # silently no-op when (a) no new GEF, (b) the GEF was already processed, or
 # (c) a run is already in progress. So re-fires cost ~nothing.
 
+# macOS-only (BSD `stat -f`, ~/Library/Logs) — this script is only used by
+# the OpenClaw/launchd workflow. Run it as:
+#   asta-watch-launchd [DATA_DIR]     # explicit data folder
+#   ST_DATA_DIR=/path asta-watch-launchd   # or via env var
+# With neither, it watches the current directory.
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  cat <<'EOF'
+Usage: asta-watch-launchd [DATA_DIR]
+
+launchd-triggered handler for new GEF drops (macOS/OpenClaw workflow). Runs
+the pipeline once for the newest unprocessed *.gef in DATA_DIR (default:
+$ST_DATA_DIR, or the current directory), then notifies. Meant to be invoked
+by a launchd agent on a timer, not run interactively.
+
+  DATA_DIR    folder to watch for a .gef file (optional positional arg)
+EOF
+  exit 0
+fi
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "asta-watch-launchd is macOS-only (BSD stat, ~/Library/Logs). On Linux use asta-watch; see share/asta/deploy/sttx-watch.service.template." >&2
+  exit 1
+fi
+
 set -uo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # our own install location, to find run_pipeline.sh next to us
+PROJECT_DIR="${1:-${ST_DATA_DIR:-$PWD}}"                     # the data folder to watch
 STATE_DIR="$HOME/Library/Logs/sttx-watch"
-# notify.py only uses the standard library, so any system python3 works here —
-# the actual pipeline environment (conda/venv) is resolved separately inside
-# run_pipeline.sh.
-PY="$(command -v python3 || echo python3)"
+# asta.notify needs the interpreter this package is installed under (it's no
+# longer a standalone stdlib-only file), so prefer $ST_PYTHON — set by the
+# asta-watch-launchd shim — falling back to whatever python3 is on PATH.
+PY="${ST_PYTHON:-$(command -v python3 || echo python3)}"
 
 mkdir -p "$STATE_DIR"
 LOCK="$STATE_DIR/run.lock"
@@ -28,6 +54,7 @@ touch "$PROCESSED"
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$WLOG"; }
 
 cd "$PROJECT_DIR" 2>/dev/null || exit 0
+PROJECT_DIR="$(pwd)"
 # shellcheck disable=SC1091
 [[ -f "$PROJECT_DIR/.env" ]] && source "$PROJECT_DIR/.env" 2>/dev/null || true
 
@@ -62,8 +89,13 @@ done
 
 log "New GEF detected: $newest (size ${cur}B). Starting pipeline."
 export ST_INPUT_GEF="$newest"
+# Pin the data dir explicitly: don't rely on run_pipeline.sh inheriting our
+# $PWD, since a stray $ST_DATA_DIR already in the environment (or set by the
+# .env we just sourced) would otherwise win over that and point the pipeline
+# at the wrong folder.
+export ST_DATA_DIR="$PROJECT_DIR"
 start=$(date +%s)
-if "$PROJECT_DIR/run_pipeline.sh" >> "$WLOG" 2>&1; then
+if bash "$SCRIPT_DIR/run_pipeline.sh" >> "$WLOG" 2>&1; then
   status="SUCCESS"
 else
   status="FAILED (exit $?)"
@@ -75,4 +107,4 @@ echo "$sig" >> "$PROCESSED"
 
 summary="Spatial Transcriptomics pipeline ${status} in ${dur}s — file: $(basename "$newest"). Outputs in project folder; details: $WLOG"
 log "$summary"
-"$PY" "$PROJECT_DIR/notify.py" "ST pipeline: ${status}" "$summary" >> "$WLOG" 2>&1 || true
+"$PY" -m asta.notify "ST pipeline: ${status}" "$summary" >> "$WLOG" 2>&1 || true

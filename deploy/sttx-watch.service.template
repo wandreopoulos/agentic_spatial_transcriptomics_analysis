@@ -1,7 +1,7 @@
-# Linux systemd user service template for watch_runner.py.
+# Linux systemd user service template for the `asta-watch` console command.
 #
-# Keeps the cross-platform watcher (watch_runner.py) running in the
-# background and automatically restarts it on login/crash.
+# Keeps the cross-platform watcher running in the background and
+# automatically restarts it on login/crash.
 #
 # Replace every <<PLACEHOLDER>> below with your actual paths, then:
 #
@@ -24,8 +24,8 @@ After=default.target
 
 [Service]
 Type=simple
-WorkingDirectory=<<PATH_TO_PROJECT>>
-ExecStart=<<PATH_TO_PYTHON>> <<PATH_TO_PROJECT>>/watch_runner.py
+WorkingDirectory=<<PATH_TO_DATA_DIR>>
+ExecStart=<<PATH_TO_ASTA_WATCH>> --path <<PATH_TO_DATA_DIR>>
 Restart=on-failure
 RestartSec=5
 

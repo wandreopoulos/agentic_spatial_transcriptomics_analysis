@@ -1,0 +1,93 @@
+{% set name = "spatial-transcriptomics-analysis" %}
+{% set version = "1.0.1" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  # for now build directly from this checkout. A future public or Bioconda recipe would instead point at
+  # a tagged GitHub release tarball + sha256 checksum.
+  path: ..
+
+build:
+  number: 0
+  noarch: python
+  # --no-deps is the important part: it keeps Conda, not pip, in charge of the
+  # dependency graph (see requirements/run below). --no-build-isolation tells
+  # pip to use the setuptools already provided in `host` below, instead of
+  # trying to download its own copy from PyPI during the build.
+  # The pipeline runner's deploy/ templates and AI_AGENT_DEPLOY.md aren't
+  # importable Python, so pip won't place them anywhere. Copy them into
+  # $PREFIX/share so a conda install still ships "the whole project".
+  # NOTE: $PYTHON (a real shell env var conda-build sets at build time), not
+  # {{ PYTHON }} (jinja) -- jinja renders in an early pass before build-only
+  # vars exist, so {{ PYTHON }} silently becomes "" there and breaks this
+  # block's indentation. $PYTHON passes through jinja untouched.
+  script: |
+    $PYTHON -m pip install . -vv --no-deps --no-build-isolation
+    mkdir -p "$PREFIX/share/asta"
+    cp -r deploy "$PREFIX/share/asta/deploy"
+    cp AI_AGENT_DEPLOY.md README.md "$PREFIX/share/asta/"
+  run_exports:
+    - {{ pin_subpackage(name, max_pin="x.x") }}
+
+requirements:
+  host:
+    - python >=3.11
+    - pip
+    - setuptools >=68
+  run:
+    - python >=3.11
+    - h5py >=3.14.0
+    - matplotlib >=3.9.4
+    - numpy >=2.0.2
+    - openai >=2.43.0,<4
+    - pandas >=2.3.3
+    - scikit-learn >=1.6.1
+    - scipy >=1.13.1
+    - seaborn >=0.13.2
+    - umap-learn >=0.5.12
+    - watchdog >=6.0.0
+
+test:
+  requires:
+    - pip
+  commands:
+    - asta-baseline --help
+    - asta-ensemble --help
+    - asta-annotate --help
+    - asta-agent --help
+    - asta-run --help
+    - asta-watch --help
+    - asta-watch-launchd --help
+    # Not `asta-saw check`: it correctly exits 1 where SAW isn't installed.
+    - asta-saw --help
+    # asta-notify takes positional subject/body args, not flags, so
+    # --help would be read as the subject and block waiting for the body
+    # on stdin. Just confirm it's installed (tests/test_smoke.py does the
+    # same thing with shutil.which).
+    - command -v asta-notify
+    # No .gef in $PWD during the test sandbox, so this should no-op and
+    # exit 0 rather than touching anything.
+    - asta-watch --once --path .
+    - test -f "$PREFIX/share/asta/README.md"
+    - test -d "$PREFIX/share/asta/deploy"
+    - pip check
+
+about:
+  home: https://github.com/wandreopoulos/agentic_spatial_transcriptomics_analysis
+  dev_url: https://github.com/wandreopoulos/agentic_spatial_transcriptomics_analysis
+  license: MIT
+  license_file: LICENSE
+  summary: Enhanced autonomous spatial transcriptomics analysis pipeline for Stereo-seq data
+
+extra:
+  identifiers:
+    - doi:10.64898/2026.08.10.743848
+  recipe-maintainers:
+    - pratham-rajesh
+    - wandreopoulos
+    - TimsPotatoChips
+    - cpollett
+    - maggieeez111

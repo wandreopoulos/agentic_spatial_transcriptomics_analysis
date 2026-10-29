@@ -4,37 +4,48 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spatial-transcriptomics-analysis"
-version = "1.0.0"
+version = "1.0.1"
 description = "Enhanced autonomous spatial transcriptomics analysis pipeline for Stereo-seq data"
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 authors = [
   { name = "Maiqi Zhang" },
+  { name = "Minjun Roe" },
+  { name = "Chris Pollett" },
+  { name = "William B. Andreopoulos" },
+  { name = "Pratham Rajesh" },
 ]
 dependencies = [
-  "h5py==3.14.0",
-  "llvmlite==0.43.0",
-  "matplotlib==3.9.4",
-  "numba==0.60.0",
-  "numpy==2.0.2",
-  "openai==2.43.0",
-  "pandas==2.3.3",
-  "pynndescent==0.6.0",
-  "scikit-learn==1.6.1",
-  "scipy==1.13.1",
-  "seaborn==0.13.2",
-  "umap-learn==0.5.12",
+  "h5py>=3.14.0",
+  "matplotlib>=3.9.4",
+  "numpy>=2.0.2",
+  "openai>=2.43.0,<4",
+  "pandas>=2.3.3",
+  "scikit-learn>=1.6.1",
+  "scipy>=1.13.1",
+  "seaborn>=0.13.2",
+  "umap-learn>=0.5.12",
+  "watchdog>=6.0.0",
 ]
 
 [project.urls]
-Repository = "https://github.com/TimsPotatoChips/openclaw_spatial_transcriptomics_analysis"
+Repository = "https://github.com/wandreopoulos/agentic_spatial_transcriptomics_analysis"
+Paper = "https://doi.org/10.64898/2026.08.10.743848"
 
-[tool.setuptools]
-py-modules = [
-  "baseline",
-  "ensemble_clustering",
-  "annotator",
-  "ai_agent",
-  "ovarian_knowledge_base",
-]
+[project.scripts]
+asta-baseline = "asta.cli:baseline"
+asta-ensemble = "asta.cli:ensemble"
+asta-annotate = "asta.cli:annotate"
+asta-agent    = "asta.cli:agent"
+asta-notify   = "asta.cli:notify"
+asta-watch    = "asta.watch_runner:main"
+asta-saw      = "asta.saw:main"
+asta-run           ="asta.cli:run_pipeline"
+asta-watch-launchd = "asta.cli:watch_launchd"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+asta = ["*.sh"]

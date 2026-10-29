@@ -2,11 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  macOS launchd agent template for watch_runner.py.
+  macOS launchd agent template for the `asta-watch` console command.
 
-  This keeps the cross-platform watcher (watch_runner.py) running in the
-  background and automatically restarts it on login/crash, without needing
-  OpenClaw. Replace every <<PLACEHOLDER>> below with your actual paths, then:
+  This keeps the cross-platform watcher running in the background and
+  automatically restarts it on login/crash, without needing OpenClaw.
+  Replace every <<PLACEHOLDER>> below with your actual paths, then:
 
     cp com.sttx-watch.plist.template ~/Library/LaunchAgents/com.sttx-watch.plist
     # edit the copy to fill in the placeholders
@@ -22,14 +22,15 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string><<PATH_TO_PYTHON>></string>
-        <!-- e.g. /opt/homebrew/Caskroom/miniconda/base/envs/spatial-transcriptomics/bin/python -->
-        <string><<PATH_TO_PROJECT>>/watch_runner.py</string>
-        <!-- e.g. /Users/yourname/Spatial Transcriptomics Analysis/watch_runner.py -->
+        <string><<PATH_TO_ASTA_WATCH>></string>
+        <!-- e.g. /opt/homebrew/Caskroom/miniconda/base/envs/spatial-transcriptomics/bin/asta-watch -->
+        <string>--path</string>
+        <string><<PATH_TO_DATA_DIR>></string>
+        <!-- the folder you'll drop .gef files into, e.g. /Users/yourname/st-data -->
     </array>
 
     <key>WorkingDirectory</key>
-    <string><<PATH_TO_PROJECT>></string>
+    <string><<PATH_TO_DATA_DIR>></string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -38,9 +39,9 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string><<PATH_TO_PROJECT>>/logs/watch_runner.stdout.log</string>
+    <string><<PATH_TO_DATA_DIR>>/logs/watch_runner.stdout.log</string>
 
     <key>StandardErrorPath</key>
-    <string><<PATH_TO_PROJECT>>/logs/watch_runner.stderr.log</string>
+    <string><<PATH_TO_DATA_DIR>>/logs/watch_runner.stderr.log</string>
 </dict>
 </plist>
